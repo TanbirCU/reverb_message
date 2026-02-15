@@ -7,7 +7,7 @@
     <title>Reverb Messenger - Real-time Chat</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    {{-- @vite(['resources/css/app.css', 'resources/js/app.js']) --}}
+    @vite(['resources/js/app.js'])
     <style>
         :root {
             --primary-color: #007bff;
@@ -822,8 +822,6 @@
     </div>
 
                 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-            <script src="https://js.pusher.com/7.2/pusher.min.js"></script>
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/laravel-echo/1.11.3/echo.iife.min.js"></script>
             <script>
         document.addEventListener('DOMContentLoaded', function() {
             const messageInput = document.getElementById('messageInput');
@@ -834,80 +832,56 @@
             const userDropdown = document.getElementById('userDropdown');
             const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             const currentUserId = {{ auth()->id() }};
-
-            // Initialize Laravel Echo (Pusher)
-            try {
-                    if (typeof Pusher !== 'undefined' && typeof Echo !== 'undefined') {
-                    Pusher.logToConsole = false;
-                    window.Pusher = Pusher;
-                    console.log('Initializing Echo with key', '{{ config("broadcasting.connections.pusher.key") }}');
-                    window.Echo = new Echo({
-                        broadcaster: 'pusher',
-                        key: '{{ config("broadcasting.connections.pusher.key") }}',
-                        cluster: '{{ config("broadcasting.connections.pusher.options.cluster") ?? '' }}',
-                        forceTLS: {{ config("broadcasting.connections.pusher.options.useTLS") ? 'true' : 'false' }},
-                        auth: { headers: { 'X-CSRF-TOKEN': csrfToken } }
-                    });
-
-                    // debug: show connector and pusher state
-                    try {
-                        console.log('Echo connector:', window.Echo.connector);
-                        const conn = window.Echo.connector.pusher.connection;
-                        conn.bind('connected', () => console.log('Pusher connected'));
-                        conn.bind('error', (err) => console.error('Pusher connection error', err));
-                    } catch (err) {
-                        console.warn('Pusher debug unavailable', err);
+            
+            // Debugging
+            console.log('Current User ID:', currentUserId);
+            
+            if (window.Echo) {
+                console.log('Echo initialized. Configuring listener...');
+                
+                window.Echo.connector.pusher.connection.bind('state_change', function(states) {
+                    console.log('Connection state changed:', states);
+                    const statusDot = document.querySelector('.user-menu .user-avatar');
+                    if (states.current === 'connected') {
+                        statusDot.style.borderColor = '#28a745'; // Green border when connected
+                        statusDot.title = 'Connected to Reverb';
+                    } else {
+                        statusDot.style.borderColor = '#dc3545'; // Red border when disconnected
+                        statusDot.title = 'Disconnected: ' + states.current;
                     }
+                });
 
-                    Echo.private('chat.{{ auth()->id() }}').listen('MessageSent', (e) => {
-                        const msg = e.message;
-                        const senderId = e.sender?.id ?? msg.from_id;
-                        const senderName = e.sender?.name ?? null;
+                window.Echo.connector.pusher.connection.bind('error', function(err) {
+                    console.error('Connection error:', err);
+                });
 
-                        // If the active conversation matches the sender, append the message
-                        if (activeConversationId && parseInt(senderId) === parseInt(activeConversationId)) {
-                            const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            const group = document.createElement('div');
-                            group.className = 'message-group';
-                            const avatarText = senderName ? senderName.slice(0,2).toUpperCase() : 'JD';
-                            group.innerHTML = `
-                                <div class="message-avatar">${escapeHtml(avatarText)}</div>
-                                <div class="message-content">
-                                    <div class="message received">${escapeHtml(msg.message)}</div>
-                                    <div class="message-time">${time}</div>
-                                </div>
-                            `;
-                            messagesContainer.appendChild(group);
-                            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                        } else {
-                            // show unread badge on conversation item
-                            const conv = document.querySelector('.conversation-item[data-user-id="' + senderId + '"]');
-                            if (conv) {
-                                let badge = conv.querySelector('.badge-unread');
-                                if (!badge) {
-                                    badge = document.createElement('div');
-                                    badge.className = 'badge-unread';
-                                    badge.textContent = '1';
-                                    conv.appendChild(badge);
-                                } else {
-                                    badge.textContent = (parseInt(badge.textContent || '0') + 1).toString();
-                                }
-                            }
-                        }
-                    });
-
-                    // After a short delay, list subscribed channels (debug)
-                    setTimeout(() => {
-                        try {
-                            const ch = window.Echo && window.Echo.connector && window.Echo.connector.channels ? Object.keys(window.Echo.connector.channels) : [];
-                            console.log('Subscribed channels:', ch);
-                        } catch (err) {
-                            console.warn('Could not list channels', err);
-                        }
-                    }, 1200);
-                }
-            } catch (err) {
-                console.error('Echo init error', err);
+                window.Echo.private(`chat.${currentUserId}`).listen('MessageSent', (e) => {
+                    console.log('Message received:', e);
+                    
+                    // If the message is from the currently active conversation, append it
+                    if (activeConversationId && e.message.from_id == activeConversationId) {
+                        const group = document.createElement('div');
+                        group.className = 'message-group';
+                        
+                        const senderName = e.sender.name || 'User';
+                        const avatarText = senderName.slice(0, 2).toUpperCase();
+                        const time = new Date(e.message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        
+                        group.innerHTML = `
+                            <div class="message-avatar">${escapeHtml(avatarText)}</div>
+                            <div class="message-content">
+                                <div class="message received">${escapeHtml(e.message.message)}</div>
+                                <div class="message-time">${time}</div>
+                            </div>
+                        `;
+                        
+                        messagesContainer.appendChild(group);
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    } 
+                    
+                    // Optional: Update conversation list preview/unread count here if needed
+                    // For now, we'll just focus on the active chat updating
+                });
             }
 
             function escapeHtml(text) {
@@ -940,7 +914,7 @@
                     const isSent = msg.from_id === currentUserId;
                     const group = document.createElement('div');
                     group.className = 'message-group' + (isSent ? ' sent' : '');
-                    const avatarText = isSent ? 'You' : (msg.sender ? (msg.sender.name || 'JD').slice(0,2) : 'JD');
+                    const avatarText = isSent ? 'You' : (msg.sender ? (msg.sender.name || 'JD').slice(0,2).toUpperCase() : 'JD');
                     const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     group.innerHTML = `
                         <div class="message-avatar">${escapeHtml(avatarText)}</div>
@@ -989,11 +963,21 @@
                         body: JSON.stringify(payload)
                     });
 
-                    if (!res.ok) throw new Error('Failed to send');
-                    await res.json();
+                    const data = await res.json();
 
-                    // reload conversation to include the new message
-                    await loadConversation(activeConversationId, document.querySelector('.chat-header-details h3').textContent);
+                    // Append the message locally for instant feedback
+                    const group = document.createElement('div');
+                    group.className = 'message-group sent';
+                    const time = new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    group.innerHTML = `
+                        <div class="message-avatar">You</div>
+                        <div class="message-content">
+                            <div class="message sent">${escapeHtml(data.message)}</div>
+                            <div class="message-time">${time}</div>
+                        </div>
+                    `;
+                    messagesContainer.appendChild(group);
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 } catch (err) {
                     console.error(err);
                 } finally {
